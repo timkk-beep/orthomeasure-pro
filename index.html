@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OrthoMeasure Pro (Full Local Version)</title>
+    
+    <!-- Libraries -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'med-bg': '#0f172a',
+                        'med-panel': '#1e293b',
+                        'med-accent': '#06b6d4',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #0f172a; color: white; font-family: 'Inter', sans-serif; }
+        canvas { cursor: crosshair; touch-action: none; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        // --- Tools Definition ---
+        const TOOLS = {
+            AI: 'AI (Acetabular Index)',
+            MP: 'MP (Migration %)',
+            NSA: 'NSA (Neck-Shaft Angle)',
+            CE: 'CE (Center-Edge Angle)',
+            Sharp: 'Sharp (Sharp Angle)',
+            Depth: 'Depth (Acetabular Depth)'
+        };
+
+        // --- Default Points (Decoupled) ---
+        const DEFAULT_POINTS = {
+            // === AI Tool ===
+            ai_h_left: { x: 0.45, y: 0.6, label: 'Y-Cartilage(L)', color: '#22d3ee' },
+            ai_h_right: { x: 0.55, y: 0.6, label: 'Y-Cartilage(R)', color: '#22d3ee' },
+            ai_r_edge: { x: 0.30, y: 0.58, label: 'Edge(R)', color: '#f472b6' },
+            ai_l_edge: { x: 0.70, y: 0.58, label: 'Edge(L)', color: '#f472b6' },
+
+            // === Sharp Tool ===
+            sharp_h_left: { x: 0.45, y: 0.6, label: 'Teardrop(L)', color: '#22d3ee' },
+            sharp_h_right: { x: 0.55, y: 0.6, label: 'Teardrop(R)', color: '#22d3ee' },
+            sharp_r_edge: { x: 0.30, y: 0.58, label: 'Edge(R)', color: '#f472b6' },
+            sharp_l_edge: { x: 0.70, y: 0.58, label: 'Edge(L)', color: '#f472b6' },
+
+            // === CE Tool ===
+            ce_h_left: { x: 0.45, y: 0.6, label: 'H-Line(L)', color: '#22d3ee' },
+            ce_h_right: { x: 0.55, y: 0.6, label: 'H-Line(R)', color: '#22d3ee' },
+            ce_r_head: { x: 0.33, y: 0.7, label: 'Head Center(R)', color: '#a78bfa' },
+            ce_r_edge: { x: 0.30, y: 0.58, label: 'Edge(R)', color: '#f472b6' },
+            ce_r_rim: { x: 0.36, y: 0.7, label: 'Radius(R)', color: '#a78bfa' },
+            ce_l_head: { x: 0.67, y: 0.7, label: 'Head Center(L)', color: '#a78bfa' },
+            ce_l_edge: { x: 0.70, y: 0.58, label: 'Edge(L)', color: '#f472b6' },
+            ce_l_rim: { x: 0.70, y: 0.7, label: 'Radius(L)', color: '#a78bfa' },
+
+            // === MP Tool ===
+            mp_h_left: { x: 0.45, y: 0.6, label: 'Y-Cartilage(L)', color: '#22d3ee' },
+            mp_h_right: { x: 0.55, y: 0.6, label: 'Y-Cartilage(R)', color: '#22d3ee' },
+            mp_r_edge: { x: 0.30, y: 0.58, label: 'Edge(R)', color: '#f472b6' },
+            mp_r_fh_in: { x: 0.38, y: 0.7, label: 'M1 (Medial)', color: '#facc15' },
+            mp_r_fh_out: { x: 0.28, y: 0.7, label: 'L1 (Lateral)', color: '#facc15' },
+            mp_l_edge: { x: 0.70, y: 0.58, label: 'Edge(L)', color: '#f472b6' },
+            mp_l_fh_in: { x: 0.62, y: 0.7, label: 'M2 (Medial)', color: '#facc15' },
+            mp_l_fh_out: { x: 0.72, y: 0.7, label: 'L2 (Lateral)', color: '#facc15' },
+
+            // === NSA Tool ===
+            nsa_r_head: { x: 0.33, y: 0.7, label: 'Head Center(R)', color: '#a78bfa' },
+            nsa_r_neck: { x: 0.28, y: 0.8, label: 'Neck Center(R)', color: '#a78bfa' },
+            nsa_r_shaft: { x: 0.25, y: 0.95, label: 'Shaft Axis(R)', color: '#a78bfa' },
+            nsa_l_head: { x: 0.67, y: 0.7, label: 'Head Center(L)', color: '#a78bfa' },
+            nsa_l_neck: { x: 0.72, y: 0.8, label: 'Neck Center(L)', color: '#a78bfa' },
+            nsa_l_shaft: { x: 0.75, y: 0.95, label: 'Shaft Axis(L)', color: '#a78bfa' },
+
+            // === Depth Tool ===
+            depth_pubic_top: { x: 0.5, y: 0.8, label: 'Pubic Symphysis', color: '#facc15' },
+            depth_r_edge: { x: 0.30, y: 0.58, label: 'Edge(R)', color: '#f472b6' },
+            depth_r_floor: { x: 0.38, y: 0.62, label: 'Floor(R)', color: '#fb923c' },
+            depth_l_edge: { x: 0.70, y: 0.58, label: 'Edge(L)', color: '#f472b6' },
+            depth_l_floor: { x: 0.62, y: 0.62, label: 'Floor(L)', color: '#fb923c' },
+        };
+
+        // --- Pure Math Utils ---
+        const getProjection = (p, a, b) => {
+            const ab = { x: b.x - a.x, y: b.y - a.y };
+            const ap = { x: p.x - a.x, y: p.y - a.y };
+            const t = (ap.x * ab.x + ap.y * ab.y) / (ab.x * ab.x + ab.y * ab.y);
+            return { x: a.x + t * ab.x, y: a.y + t * ab.y };
+        };
+        const distPointToLine = (p, a, b) => {
+            const proj = getProjection(p, a, b);
+            return Math.sqrt(Math.pow(p.x - proj.x, 2) + Math.pow(p.y - proj.y, 2));
+        };
+
+        // --- Components ---
+        const FileUpload = ({ onUpload }) => (
+            <div className="flex flex-col items-center justify-center h-full space-y-4 text-slate-400">
+                <i className="ph ph-upload-simple text-6xl"></i>
+                <p>Drag or Click to Upload X-Ray</p>
+                <input 
+                    type="file" 
+                    accept="image/*" 
+                    onChange={onUpload} 
+                    onClick={(e) => e.target.value = null} 
+                    className="hidden" 
+                    id="file-upload"
+                />
+                <label htmlFor="file-upload" className="cursor-pointer bg-med-accent text-slate-900 px-4 py-2 rounded font-bold hover:bg-cyan-400 transition">Select File</label>
+            </div>
+        );
+
+        // Custom Modal Component to replace native alert/confirm
+        const Modal = ({ config, onClose }) => {
+            if (!config.show) return null;
+            return (
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 backdrop-blur-sm">
+                    <div className="bg-slate-800 border border-slate-600 rounded-xl p-6 w-80 shadow-2xl transform transition-all scale-100">
+                        <div className="text-white text-base mb-6 leading-relaxed whitespace-pre-wrap">{config.message}</div>
+                        <div className="flex justify-end gap-3">
+                            {config.type === 'confirm' && (
+                                <button 
+                                    onClick={config.onCancel || onClose}
+                                    className="px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg text-sm font-medium transition"
+                                >
+                                    Cancel
+                                </button>
+                            )}
+                            <button 
+                                onClick={config.onConfirm}
+                                className="px-5 py-2 bg-med-accent hover:bg-cyan-400 text-slate-900 font-bold rounded-lg text-sm shadow-lg shadow-cyan-500/20 transition"
+                            >
+                                OK
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [image, setImage] = useState(null);
+            const [imgDims, setImgDims] = useState({ w: 0, h: 0 });
+            const [tool, setTool] = useState('AI');
+            const [points, setPoints] = useState(DEFAULT_POINTS);
+            const [transform, setTransform] = useState({ x: 0, y: 0, k: 1 });
+            const [patientName, setPatientName] = useState('');
+            const [activePoint, setActivePoint] = useState(null);
+            const [showAllData, setShowAllData] = useState(false);
+            
+            const [savedRecords, setSavedRecords] = useState([]);
+            const [selectedIds, setSelectedIds] = useState(new Set());
+            const [editingId, setEditingId] = useState(null);
+            const [editName, setEditName] = useState('');
+
+            // Modal State
+            const [modal, setModal] = useState({ show: false, type: 'alert', message: '', onConfirm: null, onCancel: null });
+
+            const canvasRef = useRef(null);
+            const containerRef = useRef(null);
+
+            const MOVER_ID = '__TOOL_MOVER__';
+
+            useEffect(() => {
+                try {
+                    const d = localStorage.getItem('ortho_patients_local_v2');
+                    if (d) {
+                        const parsed = JSON.parse(d);
+                        if (Array.isArray(parsed)) {
+                            setSavedRecords(parsed);
+                        }
+                    }
+                } catch (e) { console.error("Error loading records", e); }
+            }, []);
+
+            // Helper to show modal
+            const showAlert = (message) => {
+                setModal({ 
+                    show: true, 
+                    type: 'alert', 
+                    message, 
+                    onConfirm: () => setModal(prev => ({ ...prev, show: false })) 
+                });
+            };
+
+            const showConfirm = (message, onConfirm) => {
+                setModal({ 
+                    show: true, 
+                    type: 'confirm', 
+                    message, 
+                    onConfirm: () => {
+                        onConfirm();
+                        setModal(prev => ({ ...prev, show: false }));
+                    },
+                    onCancel: () => setModal(prev => ({ ...prev, show: false }))
+                });
+            };
+
+            // Moved shouldShow to the top level of App to avoid ReferenceError
+            const shouldShow = (metric) => {
+                if (showAllData) return true;
+                if (tool === metric) return true;
+                if (tool === 'CE' && metric === 'CE') return true;
+                if (tool === 'Sharp' && metric === 'Sharp') return true;
+                return false;
+            };
+
+            // === Core Logic: Detect if tool has been measured ===
+            const toolStatus = useMemo(() => {
+                const status = {};
+                Object.keys(TOOLS).forEach(t => {
+                    const prefix = t.toLowerCase() + '_';
+                    const keys = Object.keys(points).filter(k => k.startsWith(prefix));
+                    const isModified = keys.some(k => {
+                        const def = DEFAULT_POINTS[k];
+                        const curr = points[k];
+                        if (!def || !curr) return false;
+                        return Math.abs(curr.x - def.x) > 0.0001 || Math.abs(curr.y - def.y) > 0.0001;
+                    });
+                    status[t] = isModified;
+                });
+                return status;
+            }, [points]);
+
+            const handleImageUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        setImage(img);
+                        setImgDims({ w: img.width, h: img.height });
+                        resetView(img.width, img.height);
+                    };
+                    img.src = evt.target.result;
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const resetView = (w, h) => {
+                if (!containerRef.current) return;
+                const cw = containerRef.current.clientWidth;
+                const ch = containerRef.current.clientHeight;
+                const scale = Math.min(cw / w, ch / h) * 0.9;
+                setTransform({ x: (cw - w * scale) / 2, y: (ch - h * scale) / 2, k: scale });
+            };
+
+            const toScreen = (normP) => ({
+                x: transform.x + normP.x * imgDims.w * transform.k,
+                y: transform.y + normP.y * imgDims.h * transform.k
+            });
+            const toNorm = (screenP) => ({
+                x: (screenP.x - transform.x) / (imgDims.w * transform.k),
+                y: (screenP.y - transform.y) / (imgDims.h * transform.k)
+            });
+
+            const handleWheel = (e) => {
+                e.preventDefault();
+                if (!image) return;
+                const dir = e.deltaY < 0 ? 1 : -1;
+                const newK = Math.max(0.1, Math.min(20, transform.k * (1 + dir * 0.1)));
+                const rect = canvasRef.current.getBoundingClientRect();
+                const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+                setTransform({
+                    x: mx - (mx - transform.x) * (newK / transform.k),
+                    y: my - (my - transform.y) * (newK / transform.k),
+                    k: newK
+                });
+            };
+
+            const handleMouseDown = (e) => {
+                if (!image) return;
+                const rect = canvasRef.current.getBoundingClientRect();
+                const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+                
+                const relevantKeys = getRelevantPointKeys(tool);
+                let hit = null;
+                
+                for (let key of relevantKeys) {
+                    const p = toScreen(points[key]);
+                    if (Math.hypot(p.x - mx, p.y - my) < 10) { hit = key; break; }
+                }
+
+                if (!hit) {
+                    const center = getToolCenter(relevantKeys);
+                    if (center) {
+                        const sc = toScreen(center);
+                        if (Math.hypot(sc.x - mx, sc.y - my) < 15) { 
+                            hit = MOVER_ID;
+                        }
+                    }
+                }
+
+                if (hit) setActivePoint(hit);
+                else { setActivePoint('PAN'); canvasRef.current.lastMouse = { x: mx, y: my }; }
+            };
+
+            const handleMouseMove = (e) => {
+                if (!activePoint) return;
+                const rect = canvasRef.current.getBoundingClientRect();
+                const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+                
+                if (activePoint === 'PAN') {
+                    const dx = mx - canvasRef.current.lastMouse.x, dy = my - canvasRef.current.lastMouse.y;
+                    setTransform(p => ({ ...p, x: p.x + dx, y: p.y + dy }));
+                    canvasRef.current.lastMouse = { x: mx, y: my };
+                } else if (activePoint === MOVER_ID) {
+                    const np = toNorm({ x: mx, y: my });
+                    setPoints(prev => {
+                        const keys = getRelevantPointKeys(tool);
+                        const center = getToolCenter(keys, prev); 
+                        if (!center) return prev;
+
+                        const dx = np.x - center.x;
+                        const dy = np.y - center.y;
+
+                        let nextPoints = { ...prev };
+                        keys.forEach(key => {
+                            const p = prev[key];
+                            nextPoints[key] = { ...p, x: p.x + dx, y: p.y + dy };
+                        });
+                        return nextPoints;
+                    });
+                } else {
+                    const np = toNorm({ x: mx, y: my });
+                    setPoints(prev => {
+                        let newP = { x: np.x, y: np.y };
+                        const prevP = prev[activePoint];
+                        const dx = newP.x - prevP.x;
+                        const dy = newP.y - prevP.y;
+                        let nextPoints = { ...prev };
+
+                        if (tool === 'MP' && (activePoint.includes('mp_') && (activePoint.includes('_fh_out')))) {
+                            const prefix = activePoint.includes('_r_') ? 'mp_r_' : 'mp_l_';
+                            const pIn = prev[prefix + 'fh_in'];
+                            const hL = prev.mp_h_left;
+                            const hR = prev.mp_h_right;
+                            
+                            const hDx = hR.x - hL.x;
+                            const hDy = hR.y - hL.y;
+                            const vDx = np.x - pIn.x;
+                            const vDy = np.y - pIn.y;
+                            const dot = vDx * hDx + vDy * hDy;
+                            const lenSq = hDx * hDx + hDy * hDy;
+                            if (lenSq > 0.000001) {
+                                const t = dot / lenSq;
+                                newP.x = pIn.x + t * hDx;
+                                newP.y = pIn.y + t * hDy;
+                            }
+                        }
+                        
+                        if (tool === 'CE' && (activePoint === 'ce_r_head' || activePoint === 'ce_l_head')) {
+                            const prefix = activePoint.includes('_r_') ? 'ce_r_' : 'ce_l_';
+                            const rimKey = prefix + 'rim';
+                            const rimP = prev[rimKey];
+                            if (rimP) nextPoints[rimKey] = { ...rimP, x: rimP.x + dx, y: rimP.y + dy };
+                        }
+
+                        nextPoints[activePoint] = { ...prev[activePoint], x: newP.x, y: newP.y };
+                        return nextPoints;
+                    });
+                }
+            };
+
+            const handleMouseUp = () => setActivePoint(null);
+
+            const getRelevantPointKeys = (t) => {
+                if (t === 'AI') return ['ai_h_left', 'ai_h_right', 'ai_r_edge', 'ai_l_edge'];
+                if (t === 'Sharp') return ['sharp_h_left', 'sharp_h_right', 'sharp_r_edge', 'sharp_l_edge'];
+                if (t === 'CE') return ['ce_h_left', 'ce_h_right', 'ce_r_head', 'ce_l_head', 'ce_r_edge', 'ce_l_edge', 'ce_r_rim', 'ce_l_rim'];
+                if (t === 'MP') return ['mp_h_left', 'mp_h_right', 'mp_r_edge', 'mp_r_fh_in', 'mp_r_fh_out', 'mp_l_edge', 'mp_l_fh_in', 'mp_l_fh_out'];
+                if (t === 'NSA') return ['nsa_r_head', 'nsa_r_neck', 'nsa_r_shaft', 'nsa_l_head', 'nsa_l_neck', 'nsa_l_shaft'];
+                if (t === 'Depth') return ['depth_pubic_top', 'depth_r_edge', 'depth_r_floor', 'depth_l_edge', 'depth_l_floor'];
+                return Object.keys(points);
+            };
+
+            const getToolCenter = (keys, pointSource = points) => {
+                if (!keys || keys.length === 0) return null;
+                let sumX = 0, sumY = 0, count = 0;
+                keys.forEach(k => {
+                    const p = pointSource[k];
+                    if (p) { sumX += p.x; sumY += p.y; count++; }
+                });
+                return count > 0 ? { x: sumX / count, y: sumY / count } : null;
+            };
+
+            const results = useMemo(() => {
+                if (!image || imgDims.w === 0 || imgDims.h === 0) return null;
+
+                const toPx = (p) => {
+                    if (!p) return { x: 0, y: 0 }; 
+                    return { x: p.x * imgDims.w, y: p.y * imgDims.h };
+                };
+                
+                const vecPx = (p1, p2) => ({ x: p2.x - p1.x, y: p2.y - p1.y });
+                const magPx = (v) => Math.sqrt(v.x * v.x + v.y * v.y);
+                const dotPx = (v1, v2) => v1.x * v2.x + v1.y * v2.y;
+                const angleBetweenPx = (v1, v2) => {
+                    const m1 = magPx(v1);
+                    const m2 = magPx(v2);
+                    if (m1 < 1e-6 || m2 < 1e-6) return 0;
+                    const cosTheta = dotPx(v1, v2) / (m1 * m2);
+                    return Math.acos(Math.max(-1, Math.min(1, cosTheta))) * (180 / Math.PI);
+                };
+
+                const calc = (side) => {
+                    const isR = side === 'R';
+                    const s = isR ? 'r_' : 'l_'; 
+                    
+                    const aiHL = toPx(points.ai_h_left);
+                    const aiHR = toPx(points.ai_h_right);
+                    const hVecAI = vecPx(aiHL, aiHR);
+                    const aiPivot = toPx(isR ? points.ai_h_left : points.ai_h_right);
+                    const aiEdge = toPx(points[`ai_${s}edge`]);
+                    let ai = angleBetweenPx(hVecAI, vecPx(aiPivot, aiEdge));
+                    if (ai > 90) ai = 180 - ai;
+
+                    const sharpHL = toPx(points.sharp_h_left);
+                    const sharpHR = toPx(points.sharp_h_right);
+                    const hVecSharp = vecPx(sharpHL, sharpHR);
+                    const sharpTeardrop = toPx(isR ? points.sharp_h_left : points.sharp_h_right);
+                    const sharpEdge = toPx(points[`sharp_${s}edge`]);
+                    let sharp = angleBetweenPx(hVecSharp, vecPx(sharpTeardrop, sharpEdge));
+                    if (sharp > 90) sharp = 180 - sharp;
+
+                    const ceHL = toPx(points.ce_h_left);
+                    const ceHR = toPx(points.ce_h_right);
+                    const hVecCE = vecPx(ceHL, ceHR);
+                    const ceHead = toPx(points[`ce_${s}head`]);
+                    const ceEdge = toPx(points[`ce_${s}edge`]);
+                    const verticalVecCE = { x: hVecCE.y, y: -hVecCE.x }; 
+                    let ce = angleBetweenPx(verticalVecCE, vecPx(ceHead, ceEdge));
+                    const projHead = dotPx(ceHead, hVecCE);
+                    const projEdge = dotPx(ceEdge, hVecCE);
+                    let isCovered = isR ? (projEdge < projHead) : (projEdge > projHead);
+                    if (!isCovered) ce = -ce;
+
+                    const mpHL = toPx(points.mp_h_left);
+                    const mpHR = toPx(points.mp_h_right);
+                    const hVecMP = vecPx(mpHL, mpHR);
+                    
+                    const mpEdge = toPx(points[`mp_${s}edge`]);
+                    const mpIn = toPx(points[`mp_${s}fh_in`]);
+                    const mpOut = toPx(points[`mp_${s}fh_out`]);
+                    
+                    const vecWidth = vecPx(mpIn, mpOut);
+                    const hLen = magPx(hVecMP);
+                    const unitHMP = { x: hVecMP.x / hLen, y: hVecMP.y / hLen };
+                    const widthPx = Math.abs(dotPx(vecWidth, unitHMP));
+                    
+                    const vecEdgeToOut = vecPx(mpEdge, mpOut);
+                    const migPx = dotPx(vecEdgeToOut, unitHMP); 
+                    
+                    let migVal = isR ? -migPx : migPx;
+                    let mp = (migVal / widthPx) * 100;
+
+                    const nsaHead = toPx(points[`nsa_${s}head`]);
+                    const nsaNeck = toPx(points[`nsa_${s}neck`]);
+                    const nsaShaft = toPx(points[`nsa_${s}shaft`]);
+                    const nsa = angleBetweenPx(vecPx(nsaNeck, nsaHead), vecPx(nsaNeck, nsaShaft));
+
+                    const pubic = toPx(points.depth_pubic_top);
+                    const depthEdge = toPx(points[`depth_${s}edge`]);
+                    const depthFloor = toPx(points[`depth_${s}floor`]);
+                    const num = Math.abs((depthEdge.y - pubic.y)*depthFloor.x - (depthEdge.x - pubic.x)*depthFloor.y + depthEdge.x*pubic.y - depthEdge.y*pubic.x);
+                    const den = Math.sqrt(Math.pow(depthEdge.y - pubic.y, 2) + Math.pow(depthEdge.x - pubic.x, 2));
+                    const distVal = num / den;
+                    const depthVal = (distVal / imgDims.w) * 1000;
+
+                    return {
+                        AI: ai.toFixed(1),
+                        Sharp: sharp.toFixed(1),
+                        CE: ce.toFixed(1),
+                        MP: mp.toFixed(1),
+                        NSA: nsa.toFixed(1),
+                        Depth: depthVal.toFixed(0)
+                    };
+                };
+                return { R: calc('R'), L: calc('L') };
+            }, [points, image, imgDims]);
+
+            const draw = () => {
+                const cvs = canvasRef.current;
+                if (!cvs || !image) return;
+                const ctx = cvs.getContext('2d');
+                ctx.clearRect(0, 0, cvs.width, cvs.height);
+
+                ctx.save();
+                ctx.translate(transform.x, transform.y);
+                ctx.scale(transform.k, transform.k);
+                ctx.drawImage(image, 0, 0, imgDims.w, imgDims.h);
+                ctx.restore();
+
+                const pt = (p) => {
+                    if (!p) return { x: 0, y: 0 };
+                    return toScreen(p);
+                };
+                
+                const line = (p1, p2, c, dash=[]) => {
+                    if (!p1 || !p2) return; 
+                    ctx.beginPath(); ctx.strokeStyle = c; ctx.lineWidth = 2; ctx.setLineDash(dash);
+                    ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); ctx.setLineDash([]);
+                };
+                const dot = (p, c) => {
+                    if (!p) return;
+                    ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI*2); ctx.fillStyle=c; ctx.fill();
+                    ctx.stroke();
+                };
+                const text = (str, p, c) => {
+                    if (!p) return;
+                    ctx.font = "12px sans-serif"; ctx.fillStyle = c; ctx.fillText(str, p.x + 8, p.y);
+                };
+                const dist = (p1, p2) => Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+
+                if (['AI', 'MP', 'Sharp', 'CE'].includes(tool)) {
+                    let prefix = tool.toLowerCase();
+                    const hL = pt(points[`${prefix}_h_left`]);
+                    const hR = pt(points[`${prefix}_h_right`]);
+                    
+                    if (hL && hR) {
+                        const dx = hR.x - hL.x, dy = hR.y - hL.y;
+                        line({x: hL.x - dx*5, y: hL.y - dy*5}, {x: hR.x + dx*5, y: hR.y + dy*5}, '#22d3ee');
+                    }
+                }
+                
+                if (tool === 'Depth') dot(pt(points.depth_pubic_top), points.depth_pubic_top.color);
+
+                ['R', 'L'].forEach(side => {
+                    const s = side === 'R' ? 'r_' : 'l_';
+                    const color = '#f472b6';
+
+                    if (tool === 'AI') {
+                        const hL = pt(points.ai_h_left);
+                        const hR = pt(points.ai_h_right);
+                        const pivot = side === 'R' ? hL : hR;
+                        const edge = pt(points[`ai_${s}edge`]);
+                        line(pivot, edge, color);
+                    }
+                    if (tool === 'Sharp') {
+                        const hL = pt(points.sharp_h_left);
+                        const hR = pt(points.sharp_h_right);
+                        const pivot = side === 'R' ? hL : hR;
+                        const edge = pt(points[`sharp_${s}edge`]);
+                        line(pivot, edge, color);
+                    }
+                    if (tool === 'CE') {
+                        const hL = pt(points.ce_h_left);
+                        const hR = pt(points.ce_h_right);
+                        const head = pt(points[`ce_${s}head`]);
+                        const edge = pt(points[`ce_${s}edge`]);
+                        
+                        const hDx = hR.x - hL.x;
+                        const hDy = hR.y - hL.y;
+                        const pDx = hDy;
+                        const pDy = -hDx;
+                        const len = Math.sqrt(pDx*pDx + pDy*pDy);
+                        const uDx = pDx / len;
+                        const uDy = pDy / len;
+                        
+                        line(head, {x: head.x + uDx * 1000, y: head.y + uDy * 1000}, '#22d3ee', [5,5]);
+                        line(head, edge, color);
+                        
+                        const rimKey = `ce_${s}rim`;
+                        if (points[rimKey]) {
+                            const rim = pt(points[rimKey]);
+                            const r = dist(head, rim);
+                            ctx.beginPath(); ctx.arc(head.x, head.y, r, 0, Math.PI * 2);
+                            ctx.strokeStyle = '#a78bfa'; ctx.setLineDash([5, 5]); ctx.stroke(); ctx.setLineDash([]);
+                            dot(rim, '#a78bfa');
+                        }
+                        dot(head, '#a78bfa');
+                    }
+                    if (tool === 'Depth') {
+                        const pubic = pt(points.depth_pubic_top);
+                        const edge = pt(points[`depth_${s}edge`]);
+                        const floor = pt(points[`depth_${s}floor`]);
+                        line(pubic, edge, '#facc15');
+                        const proj = getProjection(floor, pubic, edge);
+                        line(floor, proj, '#fb923c', [4,4]);
+                        dot(floor, '#fb923c');
+                        text("Floor", floor, '#fb923c');
+                    }
+                    if (tool === 'MP') {
+                        const hL = pt(points.mp_h_left);
+                        const hR = pt(points.mp_h_right);
+                        const edge = pt(points[`mp_${s}edge`]);
+                        
+                        const hDx = hR.x - hL.x;
+                        const hDy = hR.y - hL.y;
+                        const pDx = -hDy;
+                        const pDy = hDx;
+                        const len = Math.sqrt(pDx*pDx + pDy*pDy);
+                        const uDx = pDx / len;
+                        const uDy = pDy / len;
+                        const EXT = 2000;
+                        
+                        line({ x: edge.x - uDx * EXT, y: edge.y - uDy * EXT }, { x: edge.x + uDx * EXT, y: edge.y + uDy * EXT }, color, [5,5]);
+
+                        const fin = pt(points[`mp_${s}fh_in`]);
+                        const fout = pt(points[`mp_${s}fh_out`]);
+                        
+                        line({ x: fin.x - uDx * EXT, y: fin.y - uDy * EXT }, { x: fin.x + uDx * EXT, y: fin.y + uDy * EXT }, '#facc15');
+                        line({ x: fout.x - uDx * EXT, y: fout.y - uDy * EXT }, { x: fout.x + uDx * EXT, y: fout.y + uDy * EXT }, '#facc15');
+
+                        dot(fin, '#facc15');
+                        dot(fout, '#facc15');
+
+                        ctx.font = "12px sans-serif";
+                        ctx.fillStyle = "#facc15";
+                        if (side === 'R') {
+                            ctx.fillText("M1", fin.x + 8, fin.y);
+                            ctx.fillText("L1", fout.x + 8, fout.y);
+                        } else {
+                            ctx.fillText("M2", fin.x + 8, fin.y);
+                            ctx.fillText("L2", fout.x + 8, fout.y);
+                        }
+                    }
+                    if (tool === 'NSA') {
+                        const h = pt(points[`nsa_${s}head`]);
+                        const n = pt(points[`nsa_${s}neck`]);
+                        const sh = pt(points[`nsa_${s}shaft`]);
+                        ctx.beginPath(); ctx.strokeStyle='#a78bfa'; ctx.lineWidth=2;
+                        ctx.moveTo(h.x, h.y); ctx.lineTo(n.x, n.y); ctx.lineTo(sh.x, sh.y); ctx.stroke();
+                    }
+                });
+
+                const relevantKeys = getRelevantPointKeys(tool);
+                const center = getToolCenter(relevantKeys);
+                if (center) {
+                    const sc = toScreen(center);
+                    ctx.beginPath();
+                    ctx.arc(sc.x, sc.y, 8, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+                    ctx.fill();
+                    ctx.strokeStyle = 'white';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(sc.x - 4, sc.y); ctx.lineTo(sc.x + 4, sc.y);
+                    ctx.moveTo(sc.x, sc.y - 4); ctx.lineTo(sc.x, sc.y + 4);
+                    ctx.stroke();
+                    if (activePoint === MOVER_ID) {
+                        ctx.fillStyle = 'white';
+                        ctx.font = "10px sans-serif";
+                        ctx.fillText("Move All", sc.x + 10, sc.y);
+                    }
+                }
+
+                getRelevantPointKeys(tool).forEach(k => {
+                    const p = points[k];
+                    const sp = pt(p);
+                    dot(sp, p.color);
+                    if (activePoint === k) {
+                        ctx.beginPath(); ctx.arc(sp.x, sp.y, 10, 0, Math.PI*2); ctx.strokeStyle=p.color; ctx.stroke();
+                    }
+                });
+            };
+
+            useEffect(() => {
+                let f; const loop = () => { draw(); f = requestAnimationFrame(loop); };
+                loop(); return () => cancelAnimationFrame(f);
+            }, [image, transform, points, tool, activePoint]);
+
+            useEffect(() => {
+                const handleResize = () => {
+                    if (containerRef.current && canvasRef.current) {
+                        canvasRef.current.width = containerRef.current.clientWidth;
+                        canvasRef.current.height = containerRef.current.clientHeight;
+                    }
+                };
+                window.addEventListener('resize', handleResize);
+                handleResize(); 
+                return () => window.removeEventListener('resize', handleResize);
+            }, [image]);
+
+            const saveRecord = () => {
+                if (!patientName) {
+                    showAlert("Please enter patient name to save.");
+                    return false; 
+                }
+                try {
+                    const rec = { id: Date.now(), patientName, date: new Date().toLocaleDateString(), results };
+                    const currentRecords = Array.isArray(savedRecords) ? savedRecords : [];
+                    const newData = [rec, ...currentRecords];
+                    localStorage.setItem('ortho_patients_local_v2', JSON.stringify(newData));
+                    setSavedRecords(newData);
+                    return true; 
+                } catch (e) {
+                    showAlert("Save failed: " + e.message);
+                    return false;
+                }
+            };
+            
+            const aiSimulation = (e) => {
+                e.stopPropagation();
+                showConfirm("This will reset all points. Confirm?", () => {
+                    setPoints(JSON.parse(JSON.stringify(DEFAULT_POINTS)));
+                    if (image) {
+                        resetView(imgDims.w, imgDims.h);
+                    }
+                });
+            };
+
+            const finishSession = (e) => {
+                e.stopPropagation();
+                if (saveRecord()) {
+                    showConfirm("Record saved. Clear canvas for next patient?", () => {
+                        setImage(null);
+                        setPatientName('');
+                        setActivePoint(null);
+                        setPoints(JSON.parse(JSON.stringify(DEFAULT_POINTS)));
+                        setTool('AI');
+                        setTransform({ x: 0, y: 0, k: 1 });
+                    });
+                }
+            };
+
+            const toggleSelectAll = () => setSelectedIds(selectedIds.size === savedRecords.length ? new Set() : new Set(savedRecords.map(r=>r.id)));
+            const deleteSelected = (e) => {
+                e.stopPropagation();
+                showConfirm(`Delete ${selectedIds.size} items?`, () => {
+                    const left = savedRecords.filter(r => !selectedIds.has(r.id));
+                    setSavedRecords(left);
+                    localStorage.setItem('ortho_patients_local_v2', JSON.stringify(left));
+                    setSelectedIds(new Set());
+                });
+            };
+            const saveEdit = (id) => {
+                const n = savedRecords.map(r => r.id===id ? {...r, patientName: editName} : r);
+                setSavedRecords(n); localStorage.setItem('ortho_patients_local_v2', JSON.stringify(n));
+                setEditingId(null);
+            };
+
+            const exportData = () => {
+                const h = ["Name", "Date", "Side", "AI(deg)", "Sharp(deg)", "CE(deg)", "Depth(rel)", "MP(%)", "NSA(deg)"];
+                const r = [h];
+                savedRecords.forEach(d => {
+                    r.push([d.patientName, d.date, "Right", d.results.R.AI, d.results.R.Sharp, d.results.R.CE, d.results.R.Depth, d.results.R.MP, d.results.R.NSA]);
+                    r.push([d.patientName, d.date, "Left", d.results.L.AI, d.results.L.Sharp, d.results.L.CE, d.results.L.Depth, d.results.L.MP, d.results.L.NSA]);
+                });
+                const blob = new Blob(["\uFEFF" + r.map(e => e.join(",")).join("\n")], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a"); a.href = url; a.download = "Ortho_Export.csv"; a.click();
+            };
+
+            const renderResultItem = (key, label, unit, isPercent = false) => {
+                const isMeasured = toolStatus[key];
+                const valR = results ? results.R[key] : '-';
+                const valL = results ? results.L[key] : '-';
+                if (!shouldShow(key)) return null;
+                return (
+                    <div className={`col-span-2 grid grid-cols-2 gap-x-2 gap-y-1 ${isMeasured ? 'bg-slate-700/50 rounded p-1' : ''}`}>
+                        <div className="flex justify-between">
+                            <span className={`${isMeasured ? 'text-white font-bold' : 'text-slate-500'}`}>
+                                {isMeasured && <span className="text-green-400 mr-1">✓</span>}
+                                {label}:
+                            </span> 
+                            <span className={parseFloat(valR) > (isPercent?33:30) ? 'text-red-400' : 'text-green-400'}>{valR}{unit}</span>
+                        </div>
+                        <div className="flex justify-between">
+                            <span className="text-slate-500"></span> 
+                            <span className={parseFloat(valL) > (isPercent?33:30) ? 'text-red-400' : 'text-green-400'}>{valL}{unit}</span>
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="flex h-screen bg-med-bg text-slate-100 font-sans">
+                    <Modal config={modal} onClose={() => setModal(prev => ({...prev, show: false}))} />
+                    {/* Sidebar */}
+                    <div className="w-80 flex-shrink-0 bg-med-panel border-r border-slate-700 flex flex-col shadow-xl z-10">
+                        <div className="p-4 border-b border-slate-700">
+                            <h1 className="text-xl font-bold text-med-accent flex items-center gap-2"><i className="ph ph-bone"></i> OrthoMeasure Pro</h1>
+                        </div>
+                        
+                        <div className="p-4 border-b border-slate-700">
+                            <label className="text-xs text-slate-400 font-bold block mb-2">Current Patient</label>
+                            <input className="w-full bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm focus:border-med-accent outline-none" 
+                                value={patientName} onChange={e=>setPatientName(e.target.value)} placeholder="Enter Name or ID" />
+                        </div>
+
+                        <div className="p-2 border-b border-slate-700 grid grid-cols-3 gap-1">
+                            {Object.keys(TOOLS).map(k => (
+                                <button key={k} onClick={()=>setTool(k)} className={`py-2 text-xs rounded border relative ${tool===k?'bg-med-accent text-slate-900 font-bold':'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'}`}>
+                                    {k}
+                                    {toolStatus[k] && <div className="absolute top-0 right-0 w-2 h-2 bg-green-500 rounded-full border border-slate-900"></div>}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="bg-slate-800/50 py-1 text-center text-xs text-med-accent font-bold">{TOOLS[tool]}</div>
+
+                        {/* Realtime Results */}
+                        <div className="p-3 bg-slate-800/30 border-b border-slate-700 overflow-y-auto max-h-80">
+                            <div className="flex justify-between items-center mb-2">
+                                <span className="text-xs font-bold text-slate-400">Real-time Data</span>
+                                <div className="flex gap-2">
+                                    <button onClick={() => setShowAllData(!showAllData)} className={`text-[10px] px-2 py-0.5 rounded border ${showAllData ? 'bg-med-accent text-black border-med-accent' : 'border-slate-600 text-slate-400'}`}>
+                                        {showAllData ? 'Simple View' : 'Show All'}
+                                    </button>
+                                    <button onClick={saveRecord} disabled={!image} className="text-xs bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded text-white disabled:opacity-50">Save</button>
+                                </div>
+                            </div>
+                            {results ? (
+                                <div className="grid grid-cols-2 gap-4 text-xs">
+                                    <div className="col-span-2 text-center border-b border-slate-700 pb-1 mb-1 grid grid-cols-2 text-slate-500">
+                                        <span>Right (R)</span>
+                                        <span>Left (L)</span>
+                                    </div>
+                                    {renderResultItem('AI', 'AI', '°')}
+                                    {renderResultItem('CE', 'CE', '°')}
+                                    {renderResultItem('Sharp', 'Sharp', '°')}
+                                    {renderResultItem('Depth', 'Depth', '')}
+                                    {renderResultItem('MP', 'MP', '%', true)}
+                                    {renderResultItem('NSA', 'NSA', '°')}
+                                </div>
+                            ) : <div className="text-center text-xs text-slate-600 py-4">Upload Image</div>}
+                        </div>
+
+                        {/* Records List */}
+                        <div className="flex-1 overflow-y-auto p-3">
+                            <div className="flex justify-between items-center mb-2 sticky top-0 bg-med-panel z-10">
+                                <div className="flex gap-2">
+                                    <span className="text-xs font-bold text-slate-500">Records ({savedRecords.length})</span>
+                                    <button onClick={toggleSelectAll} className="text-[10px] text-med-accent">Select All</button>
+                                </div>
+                                {selectedIds.size > 0 && <button onClick={deleteSelected} className="text-[10px] bg-red-600 px-2 rounded">Delete</button>}
+                            </div>
+                            {savedRecords.map(r => (
+                                <div key={r.id} className={`p-2 rounded border mb-1 text-xs ${selectedIds.has(r.id)?'bg-slate-700 border-med-accent':'bg-slate-800/30 border-slate-700'}`}>
+                                    <div className="flex gap-2 items-start">
+                                        <input type="checkbox" checked={selectedIds.has(r.id)} onChange={()=>{const s=new Set(selectedIds);s.has(r.id)?s.delete(r.id):s.add(r.id);setSelectedIds(s)}} className="mt-1"/>
+                                        <div className="flex-1">
+                                            {editingId === r.id ? (
+                                                <div className="flex gap-1"><input value={editName} onChange={e=>setEditName(e.target.value)} className="w-full bg-black border border-med-accent px-1"/> <button onClick={()=>saveEdit(r.id)} className="text-green-400">✓</button></div>
+                                            ) : (
+                                                <div className="flex justify-between group">
+                                                    <span className="font-bold text-white">{r.patientName} <i className="ph ph-pencil-simple opacity-0 group-hover:opacity-100 cursor-pointer text-slate-500 hover:text-med-accent" onClick={()=>{setEditingId(r.id);setEditName(r.patientName)}}></i></span>
+                                                    <span className="text-slate-500">{r.date}</span>
+                                                </div>
+                                            )}
+                                            <div className="grid grid-cols-2 gap-2 mt-1 text-slate-400">
+                                                <span>R CE:{r.results.R.CE}°</span> <span>L CE:{r.results.L.CE}°</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        
+                        <div className="p-3 bg-slate-900 border-t border-slate-700 flex flex-col gap-2">
+                            <div className="grid grid-cols-2 gap-2">
+                                <button onClick={aiSimulation} className="py-2 border border-slate-600 rounded text-xs text-slate-400 hover:bg-slate-800">Reset Points</button>
+                                <button onClick={finishSession} disabled={!image} className="py-2 bg-med-accent hover:bg-cyan-400 text-slate-900 rounded text-xs font-bold flex items-center justify-center gap-1">
+                                    <i className="ph ph-check-bold"></i> Finish / Next
+                                </button>
+                            </div>
+                            <button onClick={exportData} disabled={savedRecords.length===0} className="w-full bg-green-600 hover:bg-green-500 text-white py-2 rounded text-xs font-bold flex items-center justify-center gap-1">
+                                <i className="ph ph-file-csv"></i> Export CSV
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 relative bg-black overflow-hidden flex flex-col" ref={containerRef}>
+                        <div className="absolute top-4 left-4 z-20 flex gap-4 text-xs text-slate-400 bg-slate-900/80 px-4 py-2 rounded-full border border-slate-700 pointer-events-none">
+                            <span><i className="ph ph-mouse-left"></i> Drag Points</span>
+                            <span><i className="ph ph-mouse-scroll"></i> Zoom</span>
+                            <span><i className="ph ph-hand-grabbing"></i> Pan</span>
+                        </div>
+                        
+                        <div className="absolute top-4 right-4 z-20 flex gap-2 pointer-events-none">
+                             <div className="bg-slate-800/90 text-med-accent px-3 py-1 rounded border border-slate-600 font-bold text-sm">R (Patient Right)</div>
+                             <div className="bg-slate-800/90 text-med-accent px-3 py-1 rounded border border-slate-600 font-bold text-sm">L (Patient Left)</div>
+                        </div>
+
+                        {!image ? <FileUpload onUpload={handleImageUpload} /> : 
+                            <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onWheel={handleWheel} className="w-full h-full outline-none"/>
+                        }
+                    </div>
+                </div>
+            );
+        };
+        
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
