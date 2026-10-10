@@ -27,6 +27,10 @@ All processing runs locally in the browser. Images are never uploaded, and saved
 
 Open `index.html` in a modern browser. It needs an internet connection to load React, Tailwind, Babel and Phosphor Icons from CDNs.
 
+## Credits
+
+Created by [@timkk-beep](https://github.com/timkk-beep), developed with AI assistance from **Google Gemini 3.1 Pro** and **Anthropic Claude**.
+
 ## Disclaimer
 
 For research and educational use only. Not a certified medical device.
