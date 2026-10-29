@@ -7,7 +7,7 @@ abstract: >-
   acetabular index (AI), Reimers migration percentage (MP), neck-shaft
   angle (NSA), center-edge angle (CE), Sharp angle and relative acetabular
   depth. All processing runs locally in the browser. Developed with AI
-  assistance from Google Gemini 3.1 Pro and Anthropic Claude.
+  assistance from Google Gemini 3 Pro and Anthropic Claude.
 authors:
   - family-names: Gu
     given-names: Zhenkun
