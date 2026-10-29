@@ -29,7 +29,7 @@ Open `index.html` in a modern browser. It needs an internet connection to load R
 
 ## Credits
 
-Created by Zhenkun Gu ([@timkk-beep](https://github.com/timkk-beep)), developed with AI assistance from **Google Gemini 3 Pro** and **Anthropic Claude**.
+Created by Zhenkun Gu ([@timkk-beep](https://github.com/timkk-beep)), developed with AI assistance from **Google Gemini 3 Pro**.
 
 ## License
 
